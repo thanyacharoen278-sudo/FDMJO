@@ -1,0 +1,1214 @@
+--[[
+    Dekuzhub | BF Farm + Raid + FastAttack
+    H8 · Hitbox 3000 · Raid 1-5 ครั้งเดียว
+    K = เปิด/ปิด UI (Rayfield)
+]]
+
+repeat task.wait() until game:IsLoaded()
+
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local VU = game:GetService("VirtualUser")
+local LP = Players.LocalPlayer
+repeat task.wait() until LP
+
+local VIM
+pcall(function()
+    VIM = game:GetService("VirtualInputManager")
+end)
+
+local FLOAT_HEIGHT = 8
+local HITBOX = 3000
+local FAST_DELAY = 0.00001
+local DETECT_RANGE = 100000
+local TWEEN_SPEED = 160
+local FLOAT_TWEEN_TIME = 0.18
+local RAID_ISLAND_RANGE = 4000
+local RAID_NO_MOB_WAIT = 0.6
+local FA_DISTANCE = 120
+local ARRIVE_DIST = 55
+
+_G.AutoLevel = false
+_G.AutoNear = false
+_G.AutoRaid = false
+_G.AutoHaki = true
+_G.AutoEquip = true
+_G.FastAttack = true
+
+local ChooseWeapon = "Melee"
+local SelectWeapon = "Combat"
+local Ms, NameQuest, QuestLv, NameMon = "", "", 1, ""
+local CFrameQ = CFrame.new()
+local Pos = CFrame.new(0, FLOAT_HEIGHT, 0)
+local AC = nil
+local floatTween = nil
+local moveTween = nil
+local raidIslandIndex = 1
+local raidNoMobTimer = 0
+local raidArrived = false
+local FastAttackModule = nil
+
+local RaidIslands = {
+    CFrame.new(79263.203125, 21.930282592773438, -25421.021484375),
+    CFrame.new(79420.2578125, 4.920953750610352, -24189.666015625),
+    CFrame.new(79504.4296875, 8.247620582580566, -22954.46875),
+    CFrame.new(79498.6875, 25.516376495361328, -21609.3671875),
+    CFrame.new(79605.9375, 11.768150329589844, -19639.177734375),
+}
+
+local okRay, Rayfield = pcall(function()
+    return loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+end)
+if not okRay or not Rayfield then
+    okRay, Rayfield = pcall(function()
+        return loadstring(game:HttpGet(
+            "https://raw.githubusercontent.com/SiriusSoftwareLtd/Rayfield/main/source.lua"
+        ))()
+    end)
+end
+if not okRay or not Rayfield then
+    warn("[Dekuzhub] Rayfield load failed")
+    return
+end
+
+local Window = Rayfield:CreateWindow({
+    Name = "Dekuzhub",
+    LoadingTitle = "Dekuzhub",
+    LoadingSubtitle = "Farm + Raid + FastAttack",
+    Theme = "Default",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "Dekuzhub-BF",
+        FileName = "Main",
+    },
+    Discord = { Enabled = false },
+    KeySystem = false,
+})
+
+local function Char()
+    return LP.Character
+end
+
+local function Hum()
+    local c = Char()
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+local function HRP()
+    local c = Char()
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function GetLevel()
+    local n = 0
+    pcall(function()
+        n = LP.Data.Level.Value
+    end)
+    if n == 0 then
+        pcall(function()
+            n = LP.PlayerStats.lvl.Value
+        end)
+    end
+    return n or 0
+end
+
+local function CancelTween(tw)
+    pcall(function()
+        if tw then
+            tw:Cancel()
+        end
+    end)
+end
+
+local function ZeroVel()
+    pcall(function()
+        local h = HRP()
+        if h then
+            h.AssemblyLinearVelocity = Vector3.zero
+            h.AssemblyAngularVelocity = Vector3.zero
+        end
+    end)
+end
+
+local function AutoHaki()
+    if not _G.AutoHaki then
+        return
+    end
+    pcall(function()
+        local c = Char()
+        if c and not c:FindFirstChild("HasBuso") then
+            RS.Remotes.CommF_:InvokeServer("Buso")
+        end
+    end)
+end
+
+local function EquipTool(name)
+    if not name or name == "" then
+        return
+    end
+    pcall(function()
+        local c, h = Char(), Hum()
+        if not c or not h then
+            return
+        end
+        local held = c:FindFirstChildOfClass("Tool")
+        if held and held.Name == name then
+            return
+        end
+        h:UnequipTools()
+        local bag = LP:FindFirstChild("Backpack")
+        local t = (bag and bag:FindFirstChild(name)) or c:FindFirstChild(name)
+        if t and t:IsA("Tool") then
+            h:EquipTool(t)
+        end
+    end)
+end
+
+local function RefreshWeapon()
+    pcall(function()
+        local bag = LP:FindFirstChild("Backpack")
+        local c = Char()
+        local function scan(parent, tip)
+            if not parent then
+                return nil
+            end
+            for _, t in ipairs(parent:GetChildren()) do
+                if t:IsA("Tool") then
+                    local tt = ""
+                    pcall(function()
+                        tt = tostring(t.ToolTip or "")
+                    end)
+                    if tip == "Melee" and (tt == "Melee" or t.Name == "Combat") then
+                        return t.Name
+                    end
+                    if tip == "Sword" and tt == "Sword" then
+                        return t.Name
+                    end
+                    if (tip == "Blox Fruit" or tip == "Blox Fruits") and (tt == "Blox Fruit" or tt == "Fruit") then
+                        return t.Name
+                    end
+                end
+            end
+            return nil
+        end
+        local n = scan(c, ChooseWeapon) or scan(bag, ChooseWeapon)
+        if n then
+            SelectWeapon = n
+        elseif ChooseWeapon == "Melee" then
+            SelectWeapon = "Combat"
+        end
+    end)
+end
+
+local function LoadCombat()
+    pcall(function()
+        local ps = LP:FindFirstChild("PlayerScripts")
+        if ps and ps:FindFirstChild("CombatFramework") then
+            AC = require(ps.CombatFramework)
+            return
+        end
+    end)
+    pcall(function()
+        if type(getreg) \~= "function" then
+            return
+        end
+        for _, v in pairs(getreg()) do
+            if type(v) == "table" and rawget(v, "activeController") then
+                AC = v
+                break
+            end
+        end
+    end)
+end
+
+local function StopAttackTrack(c)
+    pcall(function()
+        if c and c.currentAttackTrack then
+            c.currentAttackTrack:Stop()
+            c.currentAttackTrack = nil
+        end
+    end)
+end
+
+local function InitFastAttack()
+    if FastAttackModule then
+        return FastAttackModule
+    end
+    local ok, mod = pcall(function()
+        local Modules = RS:FindFirstChild("Modules")
+        local Net = Modules and Modules:FindFirstChild("Net")
+        if not Net then
+            return nil
+        end
+        local RegisterAttack = Net:FindFirstChild("RE/RegisterAttack")
+        local RegisterHit = Net:FindFirstChild("RE/RegisterHit")
+        if not RegisterAttack or not RegisterHit then
+            return nil
+        end
+
+        local FA = {
+            Distance = FA_DISTANCE,
+            attackMobs = true,
+            attackPlayers = false,
+        }
+
+        local function IsAlive(ch)
+            return ch and ch:FindFirstChild("Humanoid") and ch.Humanoid.Health > 0
+        end
+
+        local function Collect(list, folder, maxDist)
+            local base = nil
+            if not folder then
+                return base
+            end
+            for _, enemy in ipairs(folder:GetChildren()) do
+                local head = enemy:FindFirstChild("Head")
+                if head and IsAlive(enemy) and enemy \~= LP.Character then
+                    local d = 0
+                    pcall(function()
+                        d = LP:DistanceFromCharacter(head.Position)
+                    end)
+                    if d > 0 and d < maxDist then
+                        table.insert(list, { enemy, head })
+                        base = head
+                    end
+                end
+            end
+            return base
+        end
+
+        function FA:Attack(basePart, others)
+            if not basePart or not others or #others == 0 then
+                return
+            end
+            pcall(function()
+                RegisterAttack:FireServer(0)
+                RegisterHit:FireServer(basePart, others)
+            end)
+        end
+
+        function FA:AttackNearest()
+            local others = {}
+            local p1, p2 = nil, nil
+            if self.attackMobs then
+                p1 = Collect(others, workspace:FindFirstChild("Enemies"), self.Distance)
+            end
+            if self.attackPlayers then
+                p2 = Collect(others, workspace:FindFirstChild("Characters"), self.Distance)
+            end
+            if #others > 0 then
+                self:Attack(p1 or p2, others)
+            end
+        end
+
+        function FA:BladeHits()
+            local c = LP.Character
+            if not IsAlive(c) then
+                return
+            end
+            local tool = c:FindFirstChildOfClass("Tool")
+            if tool then
+                local tip = tostring(tool.ToolTip or "")
+                if tip \~= "Gun" then
+                    self:AttackNearest()
+                end
+            end
+        end
+
+        return FA
+    end)
+    if ok and mod then
+        FastAttackModule = mod
+    end
+    return FastAttackModule
+end
+
+local function AttackNoCoolDown()
+    if _G.FastAttack then
+        pcall(function()
+            local fa = InitFastAttack()
+            if fa then
+                fa:BladeHits()
+            end
+        end)
+    end
+
+    pcall(function()
+        if not AC then
+            LoadCombat()
+        end
+        local c = AC and AC.activeController
+        if c then
+            c.timeToNextAttack = 0
+            c.attacking = false
+            c.blocking = false
+            c.hitboxMagnitude = HITBOX
+            if type(c.increment) == "number" then
+                c.increment = 99
+            end
+            if type(c.focusStart) == "number" then
+                c.focusStart = 0
+            end
+            StopAttackTrack(c)
+            if type(c.attack) == "function" then
+                c:attack()
+            end
+        end
+    end)
+
+    pcall(function()
+        local tool = Char() and Char():FindFirstChildOfClass("Tool")
+        if tool then
+            tool:Activate()
+        end
+    end)
+
+    pcall(function()
+        if VIM then
+            local cam = workspace.CurrentCamera
+            local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
+            local x, y = vp.X * 0.5, vp.Y * 0.5
+            VIM:SendMouseButtonEvent(x, y, 0, true, game, 1)
+            task.wait(0.005)
+            VIM:SendMouseButtonEvent(x, y, 0, false, game, 1)
+        else
+            VU:CaptureController()
+            VU:Button1Down(Vector2.new())
+            task.wait(0.005)
+            VU:Button1Up(Vector2.new())
+        end
+    end)
+end
+
+local function NoShake()
+    pcall(function()
+        local cam = workspace.CurrentCamera
+        if cam then
+            cam.CameraSubject = Hum() or cam.CameraSubject
+        end
+    end)
+end
+
+local function TweenTo(cf)
+    local h = HRP()
+    if not h or not cf then
+        return
+    end
+    CancelTween(moveTween)
+    CancelTween(floatTween)
+    pcall(function()
+        local dist = (h.Position - cf.Position).Magnitude
+        if dist < 5 then
+            h.CFrame = cf
+            ZeroVel()
+            return
+        end
+        local t = math.clamp(dist / TWEEN_SPEED, 0.12, 5)
+        moveTween = TweenService:Create(
+            h,
+            TweenInfo.new(t, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+            { CFrame = cf }
+        )
+        moveTween:Play()
+        moveTween.Completed:Wait()
+    end)
+    ZeroVel()
+end
+
+local function FloatOn(mob)
+    local h = HRP()
+    local eh = mob and mob:FindFirstChild("HumanoidRootPart")
+    if not h or not eh then
+        return
+    end
+    local goalPos = eh.Position + Vector3.new(0, FLOAT_HEIGHT, 0)
+    local goalCF = CFrame.lookAt(goalPos, eh.Position + Vector3.new(0, 0.35, 0))
+    local dist = (h.Position - goalPos).Magnitude
+    local hu = Hum()
+    if hu then
+        hu.WalkSpeed = 0
+        hu.JumpPower = 0
+        hu.AutoRotate = false
+    end
+    if dist > 80 then
+        CancelTween(floatTween)
+        TweenTo(goalCF)
+        return
+    end
+    if dist <= 2.5 then
+        CancelTween(floatTween)
+        h.CFrame = goalCF
+        ZeroVel()
+        return
+    end
+    CancelTween(floatTween)
+    local t = math.clamp(dist / 100, 0.06, FLOAT_TWEEN_TIME)
+    floatTween = TweenService:Create(
+        h,
+        TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { CFrame = goalCF }
+    )
+    floatTween:Play()
+    ZeroVel()
+end
+
+local function ExpandHitbox(mob)
+    pcall(function()
+        local r = mob:FindFirstChild("HumanoidRootPart")
+        if r then
+            r.Size = Vector3.new(120, 120, 120)
+            r.Transparency = 1
+            r.CanCollide = false
+        end
+        local hum = mob:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.JumpPower = 0
+            hum.WalkSpeed = 0
+        end
+    end)
+end
+
+local function IsAliveEnemy(e)
+    return e
+        and e:FindFirstChild("Humanoid")
+        and e:FindFirstChild("HumanoidRootPart")
+        and e.Humanoid.Health > 0
+end
+
+local function FindRaidMobNear(islandCF)
+    local best, bestD = nil, RAID_ISLAND_RANGE
+    local origin = islandCF.Position
+    pcall(function()
+        for _, e in ipairs(workspace.Enemies:GetChildren()) do
+            if IsAliveEnemy(e) then
+                local d = (e.HumanoidRootPart.Position - origin).Magnitude
+                if d < bestD then
+                    bestD = d
+                    best = e
+                end
+            end
+        end
+    end)
+    return best
+end
+
+local function CountRaidMobsNear(islandCF)
+    local n = 0
+    local origin = islandCF.Position
+    pcall(function()
+        for _, e in ipairs(workspace.Enemies:GetChildren()) do
+            if IsAliveEnemy(e) then
+                if (e.HumanoidRootPart.Position - origin).Magnitude <= RAID_ISLAND_RANGE then
+                    n = n + 1
+                end
+            end
+        end
+    end)
+    return n
+end
+
+local function GoNextRaidIsland()
+    if raidIslandIndex < #RaidIslands then
+        raidIslandIndex = raidIslandIndex + 1
+        raidArrived = false
+        raidNoMobTimer = 0
+        pcall(function()
+            Rayfield:Notify({
+                Title = "Raid",
+                Content = "ไปเกาะ " .. tostring(raidIslandIndex),
+                Duration = 2,
+            })
+        end)
+    else
+        raidNoMobTimer = 0
+        for i = 1, #RaidIslands do
+            if CountRaidMobsNear(RaidIslands[i]) > 0 then
+                raidIslandIndex = i
+                raidArrived = false
+                break
+            end
+        end
+    end
+end
+
+function CheckLevel()
+    local Lv = GetLevel()
+    if Lv >= 0 and Lv < 10 then
+        Ms, NameQuest, QuestLv, NameMon = "Bandit", "BanditQuest1", 1, "Bandit"
+        CFrameQ = CFrame.new(1059, 17, 1546)
+    elseif Lv >= 10 and Lv < 15 then
+        Ms, NameQuest, QuestLv, NameMon = "Monkey", "JungleQuest", 1, "Monkey"
+        CFrameQ = CFrame.new(-1601, 37, 152)
+    elseif Lv >= 15 and Lv < 30 then
+        Ms, NameQuest, QuestLv, NameMon = "Gorilla", "JungleQuest", 2, "Gorilla"
+        CFrameQ = CFrame.new(-1601, 37, 152)
+    elseif Lv >= 30 and Lv < 40 then
+        Ms, NameQuest, QuestLv, NameMon = "Pirate", "BuggyQuest1", 1, "Pirate"
+        CFrameQ = CFrame.new(-1140, 5, 3827)
+    elseif Lv >= 40 and Lv < 60 then
+        Ms, NameQuest, QuestLv, NameMon = "Brute", "BuggyQuest1", 2, "Brute"
+        CFrameQ = CFrame.new(-1140, 5, 3827)
+    elseif Lv >= 60 and Lv < 75 then
+        Ms, NameQuest, QuestLv, NameMon = "Desert Bandit", "DesertQuest", 1, "Desert Bandit"
+        CFrameQ = CFrame.new(897, 6, 4389)
+    elseif Lv >= 75 and Lv < 90 then
+        Ms, NameQuest, QuestLv, NameMon = "Desert Officer", "DesertQuest", 2, "Desert Officer"
+        CFrameQ = CFrame.new(897, 6, 4389)
+    elseif Lv >= 90 and Lv < 100 then
+        Ms, NameQuest, QuestLv, NameMon = "Snow Bandit", "SnowQuest", 1, "Snow Bandit"
+        CFrameQ = CFrame.new(1385, 87, -1298)
+    elseif Lv >= 100 and Lv < 120 then
+        Ms, NameQuest, QuestLv, NameMon = "Snowman", "SnowQuest", 2, "Snowman"
+        CFrameQ = CFrame.new(1385, 87, -1298)
+    elseif Lv >= 120 and Lv < 150 then
+        Ms, NameQuest, QuestLv, NameMon = "Chief Petty Officer", "MarineQuest2", 1, "Chief Petty Officer"
+        CFrameQ = CFrame.new(-5035, 29, 4325)
+    elseif Lv >= 150 and Lv < 175 then
+        Ms, NameQuest, QuestLv, NameMon = "Sky Bandit", "SkyQuest", 1, "Sky Bandit"
+        CFrameQ = CFrame.new(-4842, 718, -2623)
+    elseif Lv >= 175 and Lv < 190 then
+        Ms, NameQuest, QuestLv, NameMon = "Dark Master", "SkyQuest", 2, "Dark Master"
+        CFrameQ = CFrame.new(-4842, 718, -2623)
+    elseif Lv >= 190 and Lv < 210 then
+        Ms, NameQuest, QuestLv, NameMon = "Prisoner", "PrisonerQuest", 1, "Prisoner"
+        CFrameQ = CFrame.new(5309, 2, 475)
+    elseif Lv >= 210 and Lv < 250 then
+        Ms, NameQuest, QuestLv, NameMon = "Dangerous Prisoner", "PrisonerQuest", 2, "Dangerous Prisoner"
+        CFrameQ = CFrame.new(5309, 2, 475)
+    elseif Lv >= 250 and Lv < 275 then
+        Ms, NameQuest, QuestLv, NameMon = "Toga Warrior", "ColosseumQuest", 1, "Toga Warrior"
+        CFrameQ = CFrame.new(-1577, 8, -2986)
+    elseif Lv >= 275 and Lv < 300 then
+        Ms, NameQuest, QuestLv, NameMon = "Gladiator", "ColosseumQuest", 2, "Gladiator"
+        CFrameQ = CFrame.new(-1577, 8, -2986)
+    elseif Lv >= 300 and Lv < 325 then
+        Ms, NameQuest, QuestLv, NameMon = "Military Soldier", "MagmaQuest", 1, "Military Soldier"
+        CFrameQ = CFrame.new(-5314, 12, 8516)
+    elseif Lv >= 325 and Lv < 375 then
+        Ms, NameQuest, QuestLv, NameMon = "Military Spy", "MagmaQuest", 2, "Military Spy"
+        CFrameQ = CFrame.new(-5314, 12, 8516)
+    elseif Lv >= 375 and Lv < 400 then
+        Ms, NameQuest, QuestLv, NameMon = "Fishman Warrior", "FishmanQuest", 1, "Fishman Warrior"
+        CFrameQ = CFrame.new(61123, 18, 1569)
+    elseif Lv >= 400 and Lv < 450 then
+        Ms, NameQuest, QuestLv, NameMon = "Fishman Commando", "FishmanQuest", 2, "Fishman Commando"
+        CFrameQ = CFrame.new(61123, 18, 1569)
+    elseif Lv >= 450 and Lv < 480 then
+        Ms, NameQuest, QuestLv, NameMon = "God's Guard", "SkyExp1Quest", 1, "God's Guard"
+        CFrameQ = CFrame.new(-4722, 845, -1954)
+    elseif Lv >= 480 and Lv < 525 then
+        Ms, NameQuest, QuestLv, NameMon = "Shanda", "SkyExp1Quest", 2, "Shanda"
+        CFrameQ = CFrame.new(-7861, 5545, -381)
+    elseif Lv >= 525 and Lv < 555 then
+        Ms, NameQuest, QuestLv, NameMon = "Royal Squad", "SkyExp2Quest", 1, "Royal Squad"
+        CFrameQ = CFrame.new(-7903, 5636, -1412)
+    elseif Lv >= 555 and Lv < 625 then
+        Ms, NameQuest, QuestLv, NameMon = "Royal Soldier", "SkyExp2Quest", 2, "Royal Soldier"
+        CFrameQ = CFrame.new(-7903, 5636, -1412)
+    elseif Lv >= 625 and Lv < 650 then
+        Ms, NameQuest, QuestLv, NameMon = "Galley Pirate", "FountainQuest", 1, "Galley Pirate"
+        CFrameQ = CFrame.new(5256, 39, 4050)
+    elseif Lv >= 650 and Lv < 700 then
+        Ms, NameQuest, QuestLv, NameMon = "Galley Captain", "FountainQuest", 2, "Galley Captain"
+        CFrameQ = CFrame.new(5256, 39, 4050)
+    elseif Lv >= 700 and Lv < 725 then
+        Ms, NameQuest, QuestLv, NameMon = "Raider", "Area1Quest", 1, "Raider"
+        CFrameQ = CFrame.new(-425, 73, 1837)
+    elseif Lv >= 725 and Lv < 775 then
+        Ms, NameQuest, QuestLv, NameMon = "Mercenary", "Area1Quest", 2, "Mercenary"
+        CFrameQ = CFrame.new(-425, 73, 1837)
+    elseif Lv >= 775 and Lv < 800 then
+        Ms, NameQuest, QuestLv, NameMon = "Swan Pirate", "Area2Quest", 1, "Swan Pirate"
+        CFrameQ = CFrame.new(916, 126, 33043)
+    elseif Lv >= 800 and Lv < 875 then
+        Ms, NameQuest, QuestLv, NameMon = "Factory Staff", "Area2Quest", 2, "Factory Staff"
+        CFrameQ = CFrame.new(916, 126, 33043)
+    elseif Lv >= 875 and Lv < 900 then
+        Ms, NameQuest, QuestLv, NameMon = "Marine Lieutenant", "MarineQuest3", 1, "Marine Lieutenant"
+        CFrameQ = CFrame.new(-2441, 73, -3218)
+    elseif Lv >= 900 and Lv < 950 then
+        Ms, NameQuest, QuestLv, NameMon = "Marine Captain", "MarineQuest3", 2, "Marine Captain"
+        CFrameQ = CFrame.new(-2441, 73, -3218)
+    elseif Lv >= 950 and Lv < 975 then
+        Ms, NameQuest, QuestLv, NameMon = "Zombie", "ZombieQuest", 1, "Zombie"
+        CFrameQ = CFrame.new(-5493, 48, -795)
+    elseif Lv >= 975 and Lv < 1000 then
+        Ms, NameQuest, QuestLv, NameMon = "Vampire", "ZombieQuest", 2, "Vampire"
+        CFrameQ = CFrame.new(-5493, 48, -795)
+    elseif Lv >= 1000 and Lv < 1050 then
+        Ms, NameQuest, QuestLv, NameMon = "Snow Trooper", "SnowMountainQuest", 1, "Snow Trooper"
+        CFrameQ = CFrame.new(605, 401, -5371)
+    elseif Lv >= 1050 and Lv < 1100 then
+        Ms, NameQuest, QuestLv, NameMon = "Winter Warrior", "SnowMountainQuest", 2, "Winter Warrior"
+        CFrameQ = CFrame.new(605, 401, -5371)
+    elseif Lv >= 1100 and Lv < 1125 then
+        Ms, NameQuest, QuestLv, NameMon = "Lab Subordinate", "IceSideQuest", 1, "Lab Subordinate"
+        CFrameQ = CFrame.new(-6060, 16, -4905)
+    elseif Lv >= 1125 and Lv < 1175 then
+        Ms, NameQuest, QuestLv, NameMon = "Horned Warrior", "IceSideQuest", 2, "Horned Warrior"
+        CFrameQ = CFrame.new(-6060, 16, -4905)
+    elseif Lv >= 1175 and Lv < 1200 then
+        Ms, NameQuest, QuestLv, NameMon = "Magma Ninja", "FireSideQuest", 1, "Magma Ninja"
+        CFrameQ = CFrame.new(-5430, 42, -8506)
+    elseif Lv >= 1200 and Lv < 1250 then
+        Ms, NameQuest, QuestLv, NameMon = "Lava Pirate", "FireSideQuest", 2, "Lava Pirate"
+        CFrameQ = CFrame.new(-5430, 42, -8506)
+    elseif Lv >= 1250 and Lv < 1275 then
+        Ms, NameQuest, QuestLv, NameMon = "Ship Deckhand", "ShipQuest1", 1, "Ship Deckhand"
+        CFrameQ = CFrame.new(968, 125, 33253)
+    elseif Lv >= 1275 and Lv < 1300 then
+        Ms, NameQuest, QuestLv, NameMon = "Ship Engineer", "ShipQuest1", 2, "Ship Engineer"
+        CFrameQ = CFrame.new(968, 125, 33253)
+    elseif Lv >= 1300 and Lv < 1325 then
+        Ms, NameQuest, QuestLv, NameMon = "Ship Steward", "ShipQuest2", 1, "Ship Steward"
+        CFrameQ = CFrame.new(968, 125, 33253)
+    elseif Lv >= 1325 and Lv < 1350 then
+        Ms, NameQuest, QuestLv, NameMon = "Ship Officer", "ShipQuest2", 2, "Ship Officer"
+        CFrameQ = CFrame.new(968, 125, 33253)
+    elseif Lv >= 1350 and Lv < 1375 then
+        Ms, NameQuest, QuestLv, NameMon = "Arctic Warrior", "FrostQuest", 1, "Arctic Warrior"
+        CFrameQ = CFrame.new(5668, 28, -6485)
+    elseif Lv >= 1375 and Lv < 1425 then
+        Ms, NameQuest, QuestLv, NameMon = "Snow Lurker", "FrostQuest", 2, "Snow Lurker"
+        CFrameQ = CFrame.new(5668, 28, -6485)
+    elseif Lv >= 1425 and Lv < 1450 then
+        Ms, NameQuest, QuestLv, NameMon = "Sea Soldier", "ForgottenQuest", 1, "Sea Soldier"
+        CFrameQ = CFrame.new(-3054, 239, -10145)
+    elseif Lv >= 1450 and Lv < 1500 then
+        Ms, NameQuest, QuestLv, NameMon = "Water Fighter", "ForgottenQuest", 2, "Water Fighter"
+        CFrameQ = CFrame.new(-3054, 239, -10145)
+    elseif Lv >= 1500 and Lv < 1525 then
+        Ms, NameQuest, QuestLv, NameMon = "Pirate Millionaire", "PiratePortQuest", 1, "Pirate Millionaire"
+        CFrameQ = CFrame.new(-290, 29, 5581)
+    elseif Lv >= 1525 and Lv < 1575 then
+        Ms, NameQuest, QuestLv, NameMon = "Pistol Billionaire", "PiratePortQuest", 2, "Pistol Billionaire"
+        CFrameQ = CFrame.new(-290, 29, 5581)
+    elseif Lv >= 1575 and Lv < 1600 then
+        Ms, NameQuest, QuestLv, NameMon = "Dragon Crew Warrior", "DragonCrewQuest", 1, "Dragon Crew Warrior"
+        CFrameQ = CFrame.new(5851, 1208, 390)
+    elseif Lv >= 1600 and Lv < 1625 then
+        Ms, NameQuest, QuestLv, NameMon = "Dragon Crew Archer", "DragonCrewQuest", 2, "Dragon Crew Archer"
+        CFrameQ = CFrame.new(5851, 1208, 390)
+    elseif Lv >= 1625 and Lv < 1650 then
+        Ms, NameQuest, QuestLv, NameMon = "Hydra Cultist", "HydraQuest", 1, "Hydra Cultist"
+        CFrameQ = CFrame.new(5222, 604, 345)
+    elseif Lv >= 1650 and Lv < 1700 then
+        Ms, NameQuest, QuestLv, NameMon = "Hydra Leader", "HydraQuest", 2, "Hydra Leader"
+        CFrameQ = CFrame.new(5222, 604, 345)
+    elseif Lv >= 1700 and Lv < 1725 then
+        Ms, NameQuest, QuestLv, NameMon = "Marine Commodore", "MarineTreeIsland", 1, "Marine Commodore"
+        CFrameQ = CFrame.new(2660, 76, -7170)
+    elseif Lv >= 1725 and Lv < 1775 then
+        Ms, NameQuest, QuestLv, NameMon = "Marine Rear Admiral", "MarineTreeIsland", 2, "Marine Rear Admiral"
+        CFrameQ = CFrame.new(2660, 76, -7170)
+    elseif Lv >= 1775 and Lv < 1800 then
+        Ms, NameQuest, QuestLv, NameMon = "Fishman Raider", "DeepForestIsland", 1, "Fishman Raider"
+        CFrameQ = CFrame.new(-9809, 332, -5930)
+    elseif Lv >= 1800 and Lv < 1825 then
+        Ms, NameQuest, QuestLv, NameMon = "Fishman Captain", "DeepForestIsland", 2, "Fishman Captain"
+        CFrameQ = CFrame.new(-9809, 332, -5930)
+    elseif Lv >= 1825 and Lv < 1850 then
+        Ms, NameQuest, QuestLv, NameMon = "Forest Pirate", "DeepForestIsland2", 1, "Forest Pirate"
+        CFrameQ = CFrame.new(-13295, 332, -7630)
+    elseif Lv >= 1850 and Lv < 1900 then
+        Ms, NameQuest, QuestLv, NameMon = "Mythological Pirate", "DeepForestIsland2", 2, "Mythological Pirate"
+        CFrameQ = CFrame.new(-13295, 332, -7630)
+    elseif Lv >= 1900 and Lv < 1925 then
+        Ms, NameQuest, QuestLv, NameMon = "Jungle Pirate", "DeepForestIsland3", 1, "Jungle Pirate"
+        CFrameQ = CFrame.new(-11936, 332, -10551)
+    elseif Lv >= 1925 and Lv < 1975 then
+        Ms, NameQuest, QuestLv, NameMon = "Musketeer Pirate", "DeepForestIsland3", 2, "Musketeer Pirate"
+        CFrameQ = CFrame.new(-11936, 332, -10551)
+    elseif Lv >= 1975 and Lv < 2000 then
+        Ms, NameQuest, QuestLv, NameMon = "Reborn Skeleton", "HauntedQuest1", 1, "Reborn Skeleton"
+        CFrameQ = CFrame.new(-9481, 142, 5566)
+    elseif Lv >= 2000 and Lv < 2025 then
+        Ms, NameQuest, QuestLv, NameMon = "Living Zombie", "HauntedQuest1", 2, "Living Zombie"
+        CFrameQ = CFrame.new(-9481, 142, 5566)
+    elseif Lv >= 2025 and Lv < 2050 then
+        Ms, NameQuest, QuestLv, NameMon = "Demonic Soul", "HauntedQuest2", 1, "Demonic Soul"
+        CFrameQ = CFrame.new(-9515, 172, 6079)
+    elseif Lv >= 2050 and Lv < 2100 then
+        Ms, NameQuest, QuestLv, NameMon = "Possessed Mummy", "HauntedQuest2", 2, "Possessed Mummy"
+        CFrameQ = CFrame.new(-9515, 172, 6079)
+    elseif Lv >= 2100 and Lv < 2125 then
+        Ms, NameQuest, QuestLv, NameMon = "Peanut Scout", "PeanutQuest1", 1, "Peanut Scout"
+        CFrameQ = CFrame.new(-2105, 38, -10194)
+    elseif Lv >= 2125 and Lv < 2150 then
+        Ms, NameQuest, QuestLv, NameMon = "Peanut President", "PeanutQuest2", 1, "Peanut President"
+        CFrameQ = CFrame.new(-2105, 38, -10194)
+    elseif Lv >= 2150 and Lv < 2200 then
+        Ms, NameQuest, QuestLv, NameMon = "Ice Cream Chef", "IceCreamQuest1", 1, "Ice Cream Chef"
+        CFrameQ = CFrame.new(-820, 66, -10965)
+    elseif Lv >= 2200 and Lv < 2250 then
+        Ms, NameQuest, QuestLv, NameMon = "Cookie Crafter", "CakeQuest1", 1, "Cookie Crafter"
+        CFrameQ = CFrame.new(-2021, 38, -12028)
+    elseif Lv >= 2250 and Lv < 2300 then
+        Ms, NameQuest, QuestLv, NameMon = "Baking Staff", "CakeQuest2", 1, "Baking Staff"
+        CFrameQ = CFrame.new(-2021, 38, -12028)
+    elseif Lv >= 2300 and Lv < 2350 then
+        Ms, NameQuest, QuestLv, NameMon = "Cocoa Warrior", "ChocQuest1", 1, "Cocoa Warrior"
+        CFrameQ = CFrame.new(231, 30, -12613)
+    elseif Lv >= 2350 and Lv < 2400 then
+        Ms, NameQuest, QuestLv, NameMon = "Sweet Thief", "ChocQuest2", 1, "Sweet Thief"
+        CFrameQ = CFrame.new(231, 30, -12613)
+    elseif Lv >= 2400 and Lv < 2450 then
+        Ms, NameQuest, QuestLv, NameMon = "Candy Pirate", "CandyQuest1", 1, "Candy Pirate"
+        CFrameQ = CFrame.new(-1148, 16, -14446)
+    elseif Lv >= 2450 and Lv < 2500 then
+        Ms, NameQuest, QuestLv, NameMon = "Isle Outlaw", "TikiQuest1", 1, "Isle Outlaw"
+        CFrameQ = CFrame.new(-16509, 105, 162)
+    elseif Lv >= 2500 and Lv < 2550 then
+        Ms, NameQuest, QuestLv, NameMon = "Sun-kissed Warrior", "TikiQuest2", 1, "Sun-kissed Warrior"
+        CFrameQ = CFrame.new(-16509, 105, 162)
+    elseif Lv >= 2550 and Lv < 2600 then
+        Ms, NameQuest, QuestLv, NameMon = "Serpent Hunter", "TikiQuest3", 1, "Serpent Hunter"
+        CFrameQ = CFrame.new(-16662, 114, 1578)
+    elseif Lv >= 2600 and Lv < 2650 then
+        Ms, NameQuest, QuestLv, NameMon = "Reef Bandit", "SubmergedQuest1", 1, "Reef Bandit"
+        CFrameQ = CFrame.new(10782, -2088, 9259)
+    elseif Lv >= 2650 and Lv < 2700 then
+        Ms, NameQuest, QuestLv, NameMon = "Sea Chanter", "SubmergedQuest2", 1, "Sea Chanter"
+        CFrameQ = CFrame.new(10888, -2086, 10033)
+    else
+        Ms, NameQuest, QuestLv, NameMon = "Grand Devotee", "SubmergedQuest3", 2, "Grand Devotee"
+        CFrameQ = CFrame.new(9635, -1992, 9616)
+    end
+    Pos = CFrame.new(0, FLOAT_HEIGHT, 0)
+end
+
+local function TakeQuest()
+    pcall(function()
+        RS.Remotes.CommF_:InvokeServer("StartQuest", NameQuest, QuestLv)
+    end)
+end
+
+local function AbandonQuest()
+    pcall(function()
+        RS.Remotes.CommF_:InvokeServer("AbandonQuest")
+    end)
+end
+
+local function QuestReady()
+    local ready = false
+    pcall(function()
+        local q = LP.PlayerGui.Main.Quest
+        if q.Visible and NameMon and string.len(NameMon) > 0 then
+            local t = q.Container.QuestTitle.Title.Text
+            if string.find(t, NameMon) then
+                ready = true
+            end
+        end
+    end)
+    return ready
+end
+
+local TabMain = Window:CreateTab("Main", 4483362458)
+local TabInfo = Window:CreateTab("Contact", 4483362458)
+
+TabMain:CreateSection("Weapon")
+TabMain:CreateDropdown({
+    Name = "Select weapon type",
+    Options = { "Melee", "Sword", "Blox Fruits" },
+    CurrentOption = { "Melee" },
+    MultipleOptions = false,
+    Flag = "WeaponType",
+    Callback = function(opt)
+        local v = type(opt) == "table" and opt[1] or opt
+        ChooseWeapon = v or "Melee"
+        RefreshWeapon()
+        if _G.AutoEquip then
+            EquipTool(SelectWeapon)
+        end
+    end,
+})
+TabMain:CreateToggle({
+    Name = "Auto Equip",
+    CurrentValue = true,
+    Flag = "AutoEquip",
+    Callback = function(v)
+        _G.AutoEquip = v
+    end,
+})
+TabMain:CreateToggle({
+    Name = "Auto Haki",
+    CurrentValue = true,
+    Flag = "AutoHaki",
+    Callback = function(v)
+        _G.AutoHaki = v
+    end,
+})
+
+TabMain:CreateSection("Combat")
+TabMain:CreateToggle({
+    Name = "Fast Attack (RegisterHit)",
+    CurrentValue = true,
+    Flag = "FastAttack",
+    Callback = function(v)
+        _G.FastAttack = v and true or false
+        if v then
+            InitFastAttack()
+        end
+    end,
+})
+
+TabMain:CreateSection("Farm")
+TabMain:CreateToggle({
+    Name = "Auto Farm Level",
+    CurrentValue = false,
+    Flag = "AutoLevel",
+    Callback = function(v)
+        _G.AutoLevel = v
+        if not v then
+            CancelTween(floatTween)
+            CancelTween(moveTween)
+            pcall(function()
+                local hu = Hum()
+                if hu then
+                    hu.WalkSpeed = 16
+                    hu.AutoRotate = true
+                end
+            end)
+        end
+    end,
+})
+TabMain:CreateToggle({
+    Name = "Auto Farm Nearest",
+    CurrentValue = false,
+    Flag = "AutoNear",
+    Callback = function(v)
+        _G.AutoNear = v
+    end,
+})
+
+TabMain:CreateSection("Raid")
+TabMain:CreateToggle({
+    Name = "Auto Raid (เข้าเรดก่อน)",
+    CurrentValue = false,
+    Flag = "AutoRaid",
+    Callback = function(v)
+        _G.AutoRaid = v
+        if v then
+            raidIslandIndex = 1
+            raidNoMobTimer = 0
+            raidArrived = false
+            Rayfield:Notify({
+                Title = "Dekuzhub",
+                Content = "เข้า Raid ก่อน · เกาะ 1 to 5",
+                Duration = 4,
+            })
+        else
+            CancelTween(floatTween)
+            CancelTween(moveTween)
+            raidArrived = false
+        end
+    end,
+})
+
+TabMain:CreateParagraph({
+    Title = "Info",
+    Content = "H8 · Hitbox 3000 · RegisterHit\nRaid: once per island\nK = UI",
+})
+
+TabInfo:CreateSection("Dekuz channels")
+TabInfo:CreateButton({
+    Name = "TikTok (Copy)",
+    Callback = function()
+        pcall(function()
+            setclipboard("https://www.tiktok.com/@user_dekuz?_r=1&_t=ZS-99H3i5WcwQi")
+        end)
+        Rayfield:Notify({ Title = "Dekuzhub", Content = "TikTok copied", Duration = 3 })
+    end,
+})
+TabInfo:CreateButton({
+    Name = "Discord / Group (Copy)",
+    Callback = function()
+        pcall(function()
+            setclipboard("https://discord.gg/SbkDDKRpR")
+        end)
+        Rayfield:Notify({ Title = "Dekuzhub", Content = "Link copied", Duration = 3 })
+    end,
+})
+
+RunService.Stepped:Connect(function()
+    if not (_G.AutoLevel or _G.AutoNear or _G.AutoRaid) then
+        return
+    end
+    pcall(function()
+        local c = Char()
+        if not c then
+            return
+        end
+        for _, p in ipairs(c:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CanCollide = false
+            end
+        end
+        ZeroVel()
+    end)
+end)
+
+RunService.RenderStepped:Connect(function()
+    if not (_G.AutoLevel or _G.AutoNear or _G.AutoRaid) then
+        return
+    end
+    NoShake()
+    ZeroVel()
+    pcall(function()
+        if not AC then
+            LoadCombat()
+        end
+        local c = AC and AC.activeController
+        if c then
+            c.timeToNextAttack = 0
+            c.hitboxMagnitude = HITBOX
+            c.attacking = false
+        end
+    end)
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0)
+        if _G.FastAttack and (_G.AutoLevel or _G.AutoNear or _G.AutoRaid) then
+            pcall(function()
+                local fa = InitFastAttack()
+                if fa then
+                    fa:BladeHits()
+                end
+            end)
+        else
+            task.wait(0.05)
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if not _G.AutoLevel then
+            task.wait(0.15)
+        else
+            pcall(function()
+                CheckLevel()
+                RefreshWeapon()
+                AutoHaki()
+                if _G.AutoEquip then
+                    EquipTool(SelectWeapon)
+                end
+                if not QuestReady() then
+                    AbandonQuest()
+                    task.wait(0.15)
+                    local h = HRP()
+                    if h and CFrameQ then
+                        if (h.Position - CFrameQ.Position).Magnitude > 10 then
+                            TweenTo(CFrameQ * CFrame.new(0, 4, 0))
+                        end
+                        local h2 = HRP()
+                        if h2 and (h2.Position - CFrameQ.Position).Magnitude <= 14 then
+                            TakeQuest()
+                            task.wait(0.4)
+                        end
+                    end
+                else
+                    local target, bestD = nil, DETECT_RANGE
+                    local hrp = HRP()
+                    for _, e in ipairs(workspace.Enemies:GetChildren()) do
+                        if e.Name == Ms and IsAliveEnemy(e) then
+                            if hrp then
+                                local d = (e.HumanoidRootPart.Position - hrp.Position).Magnitude
+                                if d < bestD then
+                                    bestD = d
+                                    target = e
+                                end
+                            else
+                                target = e
+                                break
+                            end
+                        end
+                    end
+                    if target then
+                        ExpandHitbox(target)
+                        FloatOn(target)
+                        AttackNoCoolDown()
+                    else
+                        pcall(function()
+                            local spawns = workspace:FindFirstChild("_WorldOrigin")
+                            spawns = spawns and spawns:FindFirstChild("EnemySpawns")
+                            if not spawns or not NameMon or NameMon == "" then
+                                return
+                            end
+                            for _, s in ipairs(spawns:GetChildren()) do
+                                if string.find(s.Name, NameMon) then
+                                    local p = s:FindFirstChild("HumanoidRootPart") or s.PrimaryPart
+                                    if p then
+                                        TweenTo(p.CFrame * Pos)
+                                    elseif s:IsA("BasePart") then
+                                        TweenTo(s.CFrame * Pos)
+                                    end
+                                    break
+                                end
+                            end
+                        end)
+                    end
+                end
+            end)
+            task.wait(FAST_DELAY)
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if not _G.AutoNear then
+            task.wait(0.15)
+        else
+            pcall(function()
+                RefreshWeapon()
+                AutoHaki()
+                if _G.AutoEquip then
+                    EquipTool(SelectWeapon)
+                end
+                local h = HRP()
+                if not h then
+                    return
+                end
+                local best, bestD = nil, DETECT_RANGE
+                for _, e in ipairs(workspace.Enemies:GetChildren()) do
+                    if IsAliveEnemy(e) then
+                        local d = (e.HumanoidRootPart.Position - h.Position).Magnitude
+                        if d < bestD then
+                            bestD = d
+                            best = e
+                        end
+                    end
+                end
+                if best then
+                    ExpandHitbox(best)
+                    FloatOn(best)
+                    AttackNoCoolDown()
+                end
+            end)
+            task.wait(FAST_DELAY)
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if not _G.AutoRaid then
+            task.wait(0.2)
+        else
+            pcall(function()
+                RefreshWeapon()
+                AutoHaki()
+                if _G.AutoEquip then
+                    EquipTool(SelectWeapon)
+                end
+
+                if raidIslandIndex < 1 then
+                    raidIslandIndex = 1
+                end
+                if raidIslandIndex > #RaidIslands then
+                    raidIslandIndex = #RaidIslands
+                end
+
+                local islandCF = RaidIslands[raidIslandIndex]
+                local h = HRP()
+                if not h then
+                    return
+                end
+
+                local toIsland = (h.Position - islandCF.Position).Magnitude
+
+                if not raidArrived then
+                    if toIsland > ARRIVE_DIST then
+                        TweenTo(islandCF * CFrame.new(0, 8, 0))
+                        return
+                    end
+                    raidArrived = true
+                    raidNoMobTimer = 0
+                end
+
+                local mob = FindRaidMobNear(islandCF)
+                if mob then
+                    raidNoMobTimer = 0
+                    ExpandHitbox(mob)
+                    FloatOn(mob)
+                    AttackNoCoolDown()
+                else
+                    raidNoMobTimer = raidNoMobTimer + math.max(FAST_DELAY, 0.05)
+                    ZeroVel()
+                    if raidNoMobTimer >= RAID_NO_MOB_WAIT then
+                        GoNextRaidIsland()
+                    end
+                end
+            end)
+            task.wait(FAST_DELAY)
+        end
+    end
+end)
+
+task.spawn(function()
+    local function hook(c)
+        if not c then
+            return
+        end
+        local st = c:FindFirstChild("Stun")
+        if st then
+            st.Changed:Connect(function()
+                pcall(function()
+                    if c:FindFirstChild("Stun") then
+                        c.Stun.Value = 0
+                    end
+                end)
+            end)
+        end
+    end
+    if LP.Character then
+        hook(LP.Character)
+    end
+    LP.CharacterAdded:Connect(function(c)
+        task.wait(0.5)
+        hook(c)
+        AC = nil
+        CancelTween(floatTween)
+        CancelTween(moveTween)
+        raidArrived = false
+    end)
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.35)
+        if _G.AutoLevel or _G.AutoNear or _G.AutoRaid then
+            RefreshWeapon()
+            if _G.AutoEquip then
+                EquipTool(SelectWeapon)
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(60)
+        pcall(function()
+            VU:CaptureController()
+            VU:ClickButton2(Vector2.new())
+        end)
+    end
+end)
+
+LoadCombat()
+InitFastAttack()
+RefreshWeapon()
+
+Rayfield:Notify({
+    Title = "Dekuzhub",
+    Content = "H8 · Raid once · Ready",
+    Duration = 5,
+})
+
+print("[Dekuzhub] Ready")
